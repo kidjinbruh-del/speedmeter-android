@@ -8,6 +8,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import ru.speedmeter.app.engine.Endpoint
+import ru.speedmeter.app.ui.theme.Accent
+import ru.speedmeter.app.ui.theme.Accents
+import ru.speedmeter.app.ui.theme.GaugeStyle
+import ru.speedmeter.app.ui.theme.ThemeMode
 
 /** Один завершённый замер в истории. */
 data class TestRecord(
@@ -57,9 +61,17 @@ class Store private constructor(private val prefs: SharedPreferences) {
         val durationSeconds: Int = DEFAULT_DURATION,
         val measureUpload: Boolean = true,
         val endpoint: String = Endpoint.CLOUDFLARE.name,
+        val accentId: String = Accents.DEFAULT.id,
+        val themeModeName: String = ThemeMode.DEFAULT.name,
+        val gaugeStyleName: String = GaugeStyle.DEFAULT.name,
         val history: List<TestRecord> = emptyList(),
     ) {
         val durationMs: Long get() = durationSeconds * 1000L
+
+        /** Оформление хранится как строки: значения — перечисления. */
+        val accent: Accent get() = Accents.of(accentId)
+        val themeMode: ThemeMode get() = ThemeMode.of(themeModeName)
+        val gaugeStyle: GaugeStyle get() = GaugeStyle.of(gaugeStyleName)
     }
 
     private fun read(): State {
@@ -79,6 +91,11 @@ class Store private constructor(private val prefs: SharedPreferences) {
             measureUpload = prefs.getBoolean(KEY_UPLOAD, true),
             endpoint = prefs.getString(KEY_ENDPOINT, Endpoint.CLOUDFLARE.name)
                 ?: Endpoint.CLOUDFLARE.name,
+            accentId = prefs.getString(KEY_ACCENT, Accents.DEFAULT.id) ?: Accents.DEFAULT.id,
+            themeModeName = prefs.getString(KEY_THEME, ThemeMode.DEFAULT.name)
+                ?: ThemeMode.DEFAULT.name,
+            gaugeStyleName = prefs.getString(KEY_GAUGE, GaugeStyle.DEFAULT.name)
+                ?: GaugeStyle.DEFAULT.name,
             history = records,
         )
     }
@@ -90,6 +107,9 @@ class Store private constructor(private val prefs: SharedPreferences) {
             .putInt(KEY_DURATION, state.durationSeconds)
             .putBoolean(KEY_UPLOAD, state.measureUpload)
             .putString(KEY_ENDPOINT, state.endpoint)
+            .putString(KEY_ACCENT, state.accentId)
+            .putString(KEY_THEME, state.themeModeName)
+            .putString(KEY_GAUGE, state.gaugeStyleName)
             .putString(KEY_HISTORY, array.toString())
             .apply()
         _state.value = state
@@ -107,6 +127,15 @@ class Store private constructor(private val prefs: SharedPreferences) {
         write(_state.value.copy(endpoint = name))
     }
 
+    fun setAccent(id: String) {
+        if (Accents.ALL.none { it.id == id }) return
+        write(_state.value.copy(accentId = id))
+    }
+
+    fun setThemeMode(mode: ThemeMode) = write(_state.value.copy(themeModeName = mode.name))
+
+    fun setGaugeStyle(style: GaugeStyle) = write(_state.value.copy(gaugeStyleName = style.name))
+
     fun addRecord(record: TestRecord) {
         write(_state.value.copy(history = (listOf(record) + _state.value.history).take(MAX_HISTORY)))
     }
@@ -123,6 +152,9 @@ class Store private constructor(private val prefs: SharedPreferences) {
         private const val KEY_DURATION = "duration"
         private const val KEY_UPLOAD = "upload"
         private const val KEY_ENDPOINT = "endpoint"
+        private const val KEY_ACCENT = "accent"
+        private const val KEY_THEME = "theme"
+        private const val KEY_GAUGE = "gauge"
 
         fun of(context: Context): Store = Store(
             context.getSharedPreferences("speedmeter", Context.MODE_PRIVATE),

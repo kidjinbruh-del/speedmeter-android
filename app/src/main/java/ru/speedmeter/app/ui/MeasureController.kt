@@ -16,6 +16,9 @@ import ru.speedmeter.app.data.TestRecord
 import ru.speedmeter.app.engine.Endpoint
 import ru.speedmeter.app.engine.SpeedTest
 import ru.speedmeter.app.engine.Stats
+import ru.speedmeter.app.ui.theme.Accents
+import ru.speedmeter.app.ui.theme.GaugeStyle
+import ru.speedmeter.app.ui.theme.ThemeMode
 
 /** Состояние замера для экрана: живые цифры, фаза и итог. */
 data class MeasureState(
@@ -31,11 +34,17 @@ data class MeasureState(
     val durationSeconds: Int = Store.DEFAULT_DURATION,
     val measureUpload: Boolean = true,
     val endpoint: String = Endpoint.CLOUDFLARE.name,
+    val accentId: String = Accents.DEFAULT.id,
+    val themeMode: ThemeMode = ThemeMode.DEFAULT,
+    val gaugeStyle: GaugeStyle = GaugeStyle.DEFAULT,
     val settingsOpen: Boolean = false,
     val onClearHistory: () -> Unit = {},
     val onDuration: (Int) -> Unit = {},
     val onMeasureUpload: (Boolean) -> Unit = {},
     val onEndpoint: (String) -> Unit = {},
+    val onAccent: (String) -> Unit = {},
+    val onThemeMode: (ThemeMode) -> Unit = {},
+    val onGaugeStyle: (GaugeStyle) -> Unit = {},
     val onOpenSettings: () -> Unit = {},
     val onCloseSettings: () -> Unit = {},
 )
@@ -175,11 +184,17 @@ fun rememberMeasureController(store: Store): MeasureController {
             durationSeconds = saved.durationSeconds,
             measureUpload = saved.measureUpload,
             endpoint = saved.endpoint,
+            accentId = saved.accentId,
+            themeMode = saved.themeMode,
+            gaugeStyle = saved.gaugeStyle,
             settingsOpen = settingsOpen,
             onClearHistory = store::clearHistory,
             onDuration = store::setDuration,
             onMeasureUpload = store::setMeasureUpload,
             onEndpoint = store::setEndpoint,
+            onAccent = store::setAccent,
+            onThemeMode = store::setThemeMode,
+            onGaugeStyle = store::setGaugeStyle,
             onOpenSettings = { settingsOpen = true },
             onCloseSettings = { settingsOpen = false },
         ),
