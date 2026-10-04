@@ -221,4 +221,26 @@ class EndpointTest {
         assertEquals("Cloudflare", Endpoint.find("Нет такого").name)
         assertEquals("Cloudflare", Endpoint.find(null).name)
     }
+
+    @Test
+    fun `в списке только рабочие адреса`() {
+        // Не-HTTP схему движок не умеет: он приводит соединение к
+        // HttpURLConnection. Такие варианты нельзя показывать в настройках.
+        assertTrue(Endpoint.BY_NAME.isNotEmpty())
+        Endpoint.BY_NAME.forEach { endpoint ->
+            assertTrue(
+                "не-HTTP адрес: ${endpoint.baseUrl}",
+                endpoint.baseUrl.startsWith("https://") || endpoint.baseUrl.startsWith("http://"),
+            )
+        }
+    }
+
+    @Test
+    fun `свой сервер по шаблону отдаёт нужный объём`() {
+        val lan = Endpoint("Дом", "http://192.168.1.10/speed-{bytes}.bin")
+        assertEquals("http://192.168.1.10/speed-2000.bin", lan.downloadUrl(2000))
+        // Отдача всегда идёт по контракту /__up: свой сервер должен
+        // понимать и его, иначе отдачу в настройках надо выключить.
+        assertEquals("http://192.168.1.10/speed-{bytes}.bin/__up", lan.uploadUrl())
+    }
 }

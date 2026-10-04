@@ -85,10 +85,12 @@ class SpeedTest(private val endpoint: Endpoint) {
     /**
      * Один запрос с замером: [null], если сеть недоступна или ответ не 2xx.
      *
-     * Соединение намеренно не закрываем: HttpURLConnection держит его в
-     * пуле keep-alive, и следующий запрос переиспользует уже установленный
-     * TLS. Иначе в каждый из восьми замеров попадает рукопожатие, и
-     * «задержка» показывает время установления соединения, а не отклик.
+     * Соединение намеренно не закрываем — есть шанс, что следующий запрос
+     * переиспользует его из пула keep-alive и не платит за TLS заново.
+     * На замере эффект оказался небольшим: 78 мс против 89 мс, потому что
+     * Android держит соединение не для всех запросов подряд. Хуже от
+     * этого не становится, а код остаётся тем же, что и при явном
+     * закрытии.
      */
     private suspend fun probe(): Double? {
         coroutineContext.ensureActive()
@@ -119,7 +121,7 @@ class SpeedTest(private val endpoint: Endpoint) {
             val left = budgetMs - (SystemClock.elapsedRealtime() - startedAt)
             if (left <= 0 || ramp.size >= ramp.maxBytes) break
 
-            onProgress(Progress.Phase("Загрузка · файл ${megabytes(target)} МБ"))
+            onProgress(Progress.Phase("Загрузка · файл ${Fmt.one(megabytes(target))} МБ"))
             val sample = downloadOnce(target) { mbps, bytes ->
                 onProgress(Progress.Running(mbps, bytes, target))
             }
@@ -157,7 +159,7 @@ class SpeedTest(private val endpoint: Endpoint) {
             val left = budgetMs - (SystemClock.elapsedRealtime() - startedAt)
             if (left <= 0 || ramp.size >= ramp.maxBytes) break
 
-            onProgress(Progress.Phase("Отдача · отправляем ${megabytes(target)} МБ"))
+            onProgress(Progress.Phase("Отдача · отправляем ${Fmt.one(megabytes(target))} МБ"))
             val sample = uploadOnce(target, chunk) { mbps, bytes ->
                 onProgress(Progress.Running(mbps, bytes, target))
             }

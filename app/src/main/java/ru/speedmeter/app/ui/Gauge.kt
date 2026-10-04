@@ -153,11 +153,18 @@ fun Gauge(
                 .offset(y = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(
-                text = formatValue(valueMbps),
-                style = MaterialTheme.typography.displayLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            // Пока замера нет, большого числа не показываем вовсе. Тире
+            // «—» на 52 пунктах перечёркивало ступицу стрелки и читалось
+            // как артефакт отрисовки, а не как «измерять ещё нечем».
+            if (valueMbps > 0.0) {
+                Text(
+                    text = formatValue(valueMbps),
+                    style = MaterialTheme.typography.displayLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            } else {
+                Spacer(Modifier.height(56.dp))
+            }
             Text(
                 text = unit,
                 style = MaterialTheme.typography.labelMedium,
@@ -177,27 +184,24 @@ fun Gauge(
 }
 
 /**
- * Число для датчика: ниже ста — десятичная дробь, выше — без неё.
- * «9,8 Мбит/с» и «87 Мбит/с» читаются по-разному, и оба значения должны
- * выглядеть правдоподобно.
+ * Число для датчика. Разделитель и число знаков — через [Fmt]: в русском
+ * интерфейсе дробная часть через запятую.
  */
-fun formatValue(mbps: Double): String = when {
-    mbps <= 0.0 -> "—"
-    mbps < 10.0 -> String.format(java.util.Locale.US, "%.1f", mbps)
-    else -> String.format(java.util.Locale.US, "%.0f", mbps)
-}
+fun formatValue(mbps: Double): String =
+    if (mbps <= 0.0) "—" else ru.speedmeter.app.engine.Fmt.speed(mbps)
 
 /** Граница шкалы: округляем вверх с запасом, чтобы стрелка не упиралась. */
 fun gaugeCeiling(observed: Double): Double = ru.speedmeter.app.engine.Stats.gaugeCeiling(observed)
 
 /**
- * Миллисекунды для показа: под десять — с десятичной долей, выше — целые.
+ * Миллисекунды для показа: под десять — с дробной частью, выше — целые.
  * «3,7 мс» и «204 мс» читаются по-разному, а «684,8 мс» — просто шум.
+ * Единица измерения дописывается здесь: [Fmt] о числах знает, а о
+ * единицах решает экран.
  */
-fun formatMs(ms: Double): String = when {
-    ms <= 0.0 -> "—"
-    ms < 10.0 -> String.format(java.util.Locale.US, "%.1f мс", ms)
-    else -> String.format(java.util.Locale.US, "%.0f мс", ms)
+fun formatMs(ms: Double): String {
+    val value = ru.speedmeter.app.engine.Fmt.millis(ms)
+    return if (value == "—") value else "$value мс"
 }
 
 /** Цвет метрики: загрузка — циан, отдача — янтарь, задержка — зелёный. */

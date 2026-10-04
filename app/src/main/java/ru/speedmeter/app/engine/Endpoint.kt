@@ -1,21 +1,25 @@
 package ru.speedmeter.app.engine
 
 /**
- * Точки, откуда качаем и куда шлём.
+ * Точка, откуда качаем и куда шлём.
  *
- * По умолчанию — Cloudflare: у него открытый эндпоинт замера без ключа
- * и без регистрации, отдаёт настоящий гигабит. Остальные варианты нужны
- * для сетей, где Cloudflare недоступен, и для локальной проверки: свой
- * сервер в той же сети показывает реальную скорость линии без интернета.
+ * Схема адресов — как у Cloudflare: `/__down?bytes=N` на приём и `/__up`
+ * на отдачу, либо явный шаблон `{bytes}`. По шаблону можно указать любой
+ * свой сервер: `http://192.168.1.10/speed-{bytes}.bin` покажет скорость
+ * линии без интернета, что полезно, когда провайдер ни при чём, а Wi-Fi
+ * подводит.
  *
- * Порядок важен: первый рабочий и становится основным, остальные — запасные.
+ * В списке только Cloudflare: он открыт, без ключа и без регистрации.
+ * Запасные адреса держать в приложении незачем — если он недоступен,
+ * честнее сказать об этом, чем молча переключиться на неизвестный сервер
+ * и показать чужое число.
  */
 data class Endpoint(
     val name: String,
     val baseUrl: String,
     val note: String = "",
 ) {
-    /** Ссылка на заданный объём. Проценты поддерживает и сам Cloudflare. */
+    /** Ссылка на заданный объём. */
     fun downloadUrl(bytes: Long): String =
         if (baseUrl.contains("{bytes}")) {
             baseUrl.replace("{bytes}", bytes.toString())
@@ -25,10 +29,8 @@ data class Endpoint(
 
     fun uploadUrl(): String = baseUrl.trimEnd('/') + "/__up"
 
-    /** Маленький запрос для замера задержки: ответ 204, тело пустое. */
+    /** Маленький запрос для замера задержки: ответ быстрый, тело пустое. */
     fun latencyUrl(): String = downloadUrl(0)
-
-    val supportsUpload: Boolean get() = !note.contains("без загрузки")
 
     companion object {
         val CLOUDFLARE = Endpoint(
@@ -37,18 +39,7 @@ data class Endpoint(
             note = "открытый эндпоинт, без ключа",
         )
 
-        /**
-         * Локальный сервер: полезно, чтобы отделить скорость линии от
-         * скорости интернета. Схема file:// — для проверки с ПК, обычный
-         * HTTP-сервер на любой машине в сети подходит без изменений.
-         */
-        val LOCAL_FILE = Endpoint(
-            name = "Файл на диске",
-            baseUrl = "file:///android_asset/speedtest.bin",
-            note = "проверка без сети, только чтение",
-        )
-
-        val BY_NAME = listOf(CLOUDFLARE, LOCAL_FILE)
+        val BY_NAME = listOf(CLOUDFLARE)
 
         fun find(name: String?): Endpoint = BY_NAME.firstOrNull { it.name == name } ?: CLOUDFLARE
     }

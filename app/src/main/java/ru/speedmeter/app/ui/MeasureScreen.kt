@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -231,6 +232,26 @@ private fun ResultBlock(result: SpeedTest.Result) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // Пометка о достоверности: честные цифры плохого канала
+            // бесполезны для сравнения с тарифом, и об этом лучше сказать
+            // прямо, чем оставить вопрос без ответа.
+            qualityNote(result.pingMs, result.jitterMs)?.let { note ->
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                    Icon(
+                        Icons.Filled.WarningAmber,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.secondary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                }
+            }
         }
     }
 }
@@ -389,7 +410,9 @@ private fun FootNote() {
 private fun SettingsSheet(state: MeasureState) {
     ModalBottomSheet(
         onDismissRequest = state.onCloseSettings,
-        sheetState = rememberModalBottomSheetState(),
+        // Шторка открывается на всю высоту: на телефоне с кнопками
+        // навигации половина экрана прятала строку с сервером под ними.
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
         Column(
             Modifier

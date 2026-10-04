@@ -54,7 +54,7 @@ fun rememberMeasureController(store: Store): MeasureController {
 
     var running by remember { mutableStateOf(false) }
     var live by remember { mutableStateOf(0.0) }
-    var caption by remember { mutableStateOf("Нажмите «Измерить»") }
+    var caption by remember { mutableStateOf("Готов к замеру") }
     var progress by remember { mutableFloatStateOf(0f) }
     var ceiling by remember { mutableStateOf(1.0) }
     var result by remember { mutableStateOf<SpeedTest.Result?>(null) }
