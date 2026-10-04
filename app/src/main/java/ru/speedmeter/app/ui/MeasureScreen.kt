@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -126,20 +127,25 @@ fun MeasureScreen(state: MeasureState, onStart: () -> Unit, onStop: () -> Unit) 
 
         Button(
             onClick = { if (busy) onStop() else onStart() },
-            enabled = !busy || true,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(60.dp),
             shape = RoundedCornerShape(18.dp),
         ) {
-            Icon(
-                if (busy) Icons.Filled.DeleteSweep else Icons.Filled.Refresh,
-                contentDescription = null,
-            )
-            Text(
-                text = "  " + if (busy) "Прервать" else "Измерить",
-                style = MaterialTheme.typography.titleMedium,
-            )
+            // Отступ между иконкой и подписью задаём рядом, а не пробелами в
+            // строке: с пробелами текст был «  Измерить», и ни поиск по
+            // подписи, ни скринридер его не узнавали.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (busy) Icons.Filled.DeleteSweep else Icons.Filled.Refresh,
+                    contentDescription = null,
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = if (busy) "Прервать" else "Измерить",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -208,13 +214,13 @@ private fun ResultBlock(result: SpeedTest.Result) {
             Row(Modifier.fillMaxWidth()) {
                 SmallMetric(
                     label = "Задержка",
-                    value = String.format(Locale.US, "%.0f мс", result.pingMs),
+                    value = formatMs(result.pingMs),
                     color = metricColor(MetricKind.PING),
                     modifier = Modifier.weight(1f),
                 )
                 SmallMetric(
                     label = "Джиттер",
-                    value = String.format(Locale.US, "%.1f мс", result.jitterMs),
+                    value = formatMs(result.jitterMs),
                     color = metricColor(MetricKind.PING),
                     modifier = Modifier.weight(1f),
                 )
@@ -325,7 +331,7 @@ private fun HistoryRow(record: TestRecord) {
                 )
             }
             Text(
-                "${record.pingMs.toInt()} мс",
+                formatMs(record.pingMs),
                 style = MaterialTheme.typography.titleSmall,
                 color = metricColor(MetricKind.PING),
             )
@@ -388,6 +394,9 @@ private fun SettingsSheet(state: MeasureState) {
         Column(
             Modifier
                 .fillMaxWidth()
+                // Без этого нижний край уходил под панель навигации:
+                // шторка на телефоне с кнопками, а не с жестами.
+                .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
         ) {
@@ -402,6 +411,7 @@ private fun SettingsSheet(state: MeasureState) {
                         text = "$seconds с",
                         selected = state.durationSeconds == seconds,
                         onClick = { state.onDuration(seconds) },
+                        fill = false,
                     )
                 }
             }
@@ -458,11 +468,22 @@ private fun SettingsSheet(state: MeasureState) {
     }
 }
 
+/**
+ * Переключатель-наклейка. [fill] выключается для ряда коротких вариантов:
+ * с fill = true каждый чип занимал всю ширину, и в строке помещался только
+ * первый — остальные уезжали за экран и оставляли после себя пустоту.
+ */
 @Composable
-private fun Chip(text: String, selected: Boolean, onClick: () -> Unit, note: String? = null) {
+private fun Chip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    note: String? = null,
+    fill: Boolean = true,
+) {
     Card(
         Modifier
-            .fillMaxWidth()
+            .then(if (fill) Modifier.fillMaxWidth() else Modifier)
             .heightIn(min = 52.dp)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),

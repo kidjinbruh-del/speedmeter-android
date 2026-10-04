@@ -190,6 +190,16 @@ fun formatValue(mbps: Double): String = when {
 /** Граница шкалы: округляем вверх с запасом, чтобы стрелка не упиралась. */
 fun gaugeCeiling(observed: Double): Double = ru.speedmeter.app.engine.Stats.gaugeCeiling(observed)
 
+/**
+ * Миллисекунды для показа: под десять — с десятичной долей, выше — целые.
+ * «3,7 мс» и «204 мс» читаются по-разному, а «684,8 мс» — просто шум.
+ */
+fun formatMs(ms: Double): String = when {
+    ms <= 0.0 -> "—"
+    ms < 10.0 -> String.format(java.util.Locale.US, "%.1f мс", ms)
+    else -> String.format(java.util.Locale.US, "%.0f мс", ms)
+}
+
 /** Цвет метрики: загрузка — циан, отдача — янтарь, задержка — зелёный. */
 @Composable
 fun metricColor(kind: MetricKind) = when (kind) {

@@ -75,7 +75,11 @@ class SpeedTest(private val endpoint: Endpoint) {
                 if (index != rounds - 1) delay(120)
             }
             val warm = samples.drop(1).ifEmpty { samples }
-            Stats.percentile(warm, 0.5) to Stats.jitter(warm)
+            // Задержку берём медианой по всем замерам — медиана сама по себе
+            // устойчива. А вот джиттер считаем без самой медленной записи:
+            // одна заминка в сети иначе даёт «джиттер 600 мс», и число
+            // перестаёт что-либо говорить о канале.
+            Stats.percentile(warm, 0.5) to Stats.jitter(Stats.dropLongest(warm))
         }
 
     /**

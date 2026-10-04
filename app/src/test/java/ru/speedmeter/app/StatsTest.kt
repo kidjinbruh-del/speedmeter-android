@@ -81,6 +81,33 @@ class StatsTest {
     }
 
     @Test
+    fun `заминка в сети не переписывает джиттер`() {
+        // Раз заминка — 1200 мс. Без отбрасывания среднее по разницам
+        // дало бы сотни миллисекунд и ничего не значило бы.
+        val samples = listOf(60.0, 59.0, 1200.0, 61.0, 62.0, 60.0)
+        assertEquals(1.5, Stats.jitter(Stats.dropLongest(samples)), 0.001)
+    }
+
+    @Test
+    fun `убирается ровно одна самая долгая запись`() {
+        val samples = listOf(60.0, 900.0, 61.0, 62.0)
+        assertEquals(listOf(60.0, 61.0, 62.0), Stats.dropLongest(samples))
+        // Долгих два: убирается один, второй остаётся — он тоже настоящее
+        // измерение, а не случайность.
+        assertEquals(listOf(60.0, 900.0), Stats.dropLongest(listOf(60.0, 900.0, 901.0)))
+    }
+
+    @Test
+    fun `на двух замерах убирать нечего`() {
+        assertEquals(listOf(10.0, 900.0), Stats.dropLongest(listOf(10.0, 900.0)))
+    }
+
+    @Test
+    fun `одинаковые замеры не ломают отбрасывание`() {
+        assertEquals(listOf(50.0, 50.0), Stats.dropLongest(listOf(50.0, 50.0, 50.0)))
+    }
+
+    @Test
     fun `процентиль берёт значение из отсортированного списка`() {
         val values = listOf(5.0, 1.0, 9.0, 3.0, 7.0)
         assertEquals(1.0, Stats.percentile(values, 0.0), 0.001)

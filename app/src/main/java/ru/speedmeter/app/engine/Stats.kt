@@ -64,6 +64,22 @@ object Stats {
         return deltas.sum() / deltas.size
     }
 
+    /**
+     * Убирает единственную самую долгую запись — заминку.
+     *
+     * Секундное ожидание в сети — обычное дело, и без этого разовое
+     * ожидание превращает джиттер в 600 мс: число перестаёт говорить о
+     * канале и начинает говорить о том, что один раз кто-то качнул файл.
+     *
+     * Именно максимум, а не минимум: для задержки «дольше» значит «хуже».
+     * Замеров меньше трём ничего не убираем — там и так нечего отбрасывать.
+     */
+    fun dropLongest(values: List<Double>): List<Double> {
+        if (values.size < 3) return values
+        val longest = values.indexOf(values.max())
+        return values.filterIndexed { index, _ -> index != longest }
+    }
+
     /** Размах значений: насколько канал гуляет во времени. */
     fun spread(values: List<Double>): Double {
         if (values.size < 2) return 0.0

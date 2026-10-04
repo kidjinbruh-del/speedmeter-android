@@ -23,7 +23,9 @@ data class MeasureState(
     val liveMbps: Double = 0.0,
     val ceilingMbps: Double = 1.0,
     val progress: Float = 0f,
-    val caption: String = "Нажмите «Измерить»",
+    // Подпись не повторяет текст кнопки: иначе поиск по надписи находит
+    // подпись датчика вместо самой кнопки и тап уходит мимо.
+    val caption: String = "Готов к замеру",
     val result: SpeedTest.Result? = null,
     val history: List<TestRecord> = emptyList(),
     val durationSeconds: Int = Store.DEFAULT_DURATION,
