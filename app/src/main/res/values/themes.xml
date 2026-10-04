@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Тема-заглушка: цвета берёт Compose. Нужна только база, чтобы
+         окно не мигало белым между запуском и первой композицией. -->
+    <style name="Theme.Speedmeter" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#070A0F</item>
+        <item name="android:navigationBarColor">#070A0F</item>
+        <item name="android:windowBackground">#070A0F</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>
