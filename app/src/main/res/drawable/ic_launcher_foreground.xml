@@ -1,37 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Иконка «Спидометр» — упрощённая.
+<!-- Иконка «Спидометр».
 
-     Прежняя была дугой шкалы, поверх которой шла заполненная дуга того же
-     радиуса, стрелка и круглый центр: четыре фигуры, четыре цвета. Заполненная
-     часть дуги в мелком размере сливалась с основной, и оставалась дуга со
-     стрелкой — то есть самая сложная часть была не видна.
-
-     Сейчас дуга и стрелка одного цвета: датчик и стрелка. Круглый центр убран,
-     стрелка приходит в начало дуги и идёт до её середины — короче она в
-     мелком размере не читалась, оставался просто ободок.
+     Что изменилось и почему:
+     * дуга стала 270°, а не полукругом. Полукруг в мелком размере читается
+       как «радуга» или «улыбка», а три четверти круга — как шкала прибора;
+     * стрелка идёт из центра, а не из края: видно, что это показание, а не
+       ещё одна дуга;
+     * появились насечки и ступица — на 48dp они дают «приборность», но не
+       сливаются, потому что вся графика одной толщины и одного цвета.
 
      Плоско, без градиентов: в монохромной маске Android 13+ система берёт
-     только альфу.
+     только альфу, и градиент превратился бы в серое пятно.
 
-     Холст 108×108. Безопасная зона — круг радиусом 36 от центра (54,54);
-     концы дуги отстоят от центра на 24, всё с запасом внутри. -->
+     Холст 108×108. Безопасная зона адаптивной иконки — круг радиусом 33
+     от центра (54,54); самая дальняя точка рисунка — 27, всё с запасом. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- дуга шкалы -->
+    <!-- шкала: 270°, от 135° до 45° -->
     <path
-        android:pathData="M32,70 A22,22 0 1 1 76,70"
-        android:strokeColor="#35E0D0"
+        android:pathData="M37,71 A24,24 0 1 1 71,71"
+        android:strokeColor="#3BE8D4"
         android:strokeWidth="8"
+        android:strokeLineCap="round" />
+
+    <!-- насечки внутри шкалы: слева, сверху, справа -->
+    <path
+        android:pathData="M37,54 L32,54"
+        android:strokeColor="#3BE8D4"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M54,32 L54,37"
+        android:strokeColor="#3BE8D4"
+        android:strokeWidth="3"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M71,54 L76,54"
+        android:strokeColor="#3BE8D4"
+        android:strokeWidth="3"
         android:strokeLineCap="round" />
 
     <!-- стрелка -->
     <path
-        android:pathData="M54,70 L71,44"
-        android:strokeColor="#35E0D0"
+        android:pathData="M54,54 L66,42"
+        android:strokeColor="#3BE8D4"
         android:strokeWidth="7"
         android:strokeLineCap="round" />
+
+    <!-- ступица -->
+    <path
+        android:pathData="M54,54 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0"
+        android:fillColor="#3BE8D4" />
 </vector>

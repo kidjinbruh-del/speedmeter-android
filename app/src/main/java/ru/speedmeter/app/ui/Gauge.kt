@@ -92,7 +92,10 @@ fun Gauge(
         val ring = style == GaugeStyle.RING
         val diameter = min(maxWidth - 34.dp, 250.dp)
         val hubY = if (ring) diameter / 2f else diameter / 2f + 12.dp
-        val blockHeight = if (ring) diameter + 24.dp else hubY + 132.dp
+        // Высота блока: у дуги число живёт ВНУТРИ полукруга, а подпись —
+        // под ступицей. Раньше число стояло ниже дуги, и между стрелкой
+        // и цифрой оставалась пустая полоса в треть экрана.
+        val blockHeight = if (ring) diameter + 24.dp else hubY + 46.dp
 
         Box(
             Modifier
@@ -232,12 +235,15 @@ fun Gauge(
                     )
                 }
             } else {
-                Column(
+                // Число — по центру полукруга, прижато к ступице снизу:
+                // так оно читается как показание прибора, а не как подпись
+                // под картинкой.
+                Box(
                     Modifier
                         .align(Alignment.TopStart)
-                        .offset(y = hubY + 14.dp)
-                        .fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                        .fillMaxWidth()
+                        .height(hubY),
+                    contentAlignment = Alignment.BottomCenter,
                 ) {
                     ValueBlock(
                         hasValue = hasValue,
@@ -245,9 +251,22 @@ fun Gauge(
                         valueColor = valueColor,
                         unit = unit,
                         unitColor = if (dimmed) scheme.onSurfaceVariant else accent,
-                        caption = caption,
+                        caption = "",
+                        showCaption = false,
                     )
                 }
+
+                Text(
+                    text = caption,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(y = hubY + 14.dp)
+                        .fillMaxWidth(0.86f)
+                        .padding(horizontal = 16.dp),
+                )
             }
         }
     }
@@ -262,6 +281,7 @@ private fun ValueBlock(
     unit: String,
     unitColor: androidx.compose.ui.graphics.Color,
     caption: String,
+    showCaption: Boolean = true,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         // Пока замера нет, большого числа не показываем вовсе: тире «—» на
@@ -277,21 +297,31 @@ private fun ValueBlock(
                 color = valueColor,
             )
         } else {
-            Spacer(Modifier.height(62.dp))
+            // Прочерк вместо пустоты: место под число больше не выглядит
+            // дырой в приборе, и видно, что показаний пока нет.
+            Text(
+                text = "0",
+                style = MaterialTheme.typography.displayLarge.copy(
+                    fontFeatureSettings = TabularFigures,
+                ),
+                color = valueColor.copy(alpha = 0.28f),
+            )
         }
         Text(
             text = unit,
             style = MaterialTheme.typography.labelSmall,
             color = unitColor,
         )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = caption,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(0.78f),
-        )
+        if (showCaption) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = caption,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(0.78f),
+            )
+        }
     }
 }
 

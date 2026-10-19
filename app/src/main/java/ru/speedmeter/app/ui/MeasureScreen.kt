@@ -31,10 +31,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import ru.speedmeter.app.engine.Endpoint
+import ru.speedmeter.app.engine.HistoryExporter
 import ru.speedmeter.app.engine.SpeedTest
 import ru.speedmeter.app.ui.theme.Sizes
 import ru.speedmeter.app.ui.theme.TabularFigures
@@ -51,6 +55,8 @@ import ru.speedmeter.app.ui.theme.TabularFigures
  */
 @Composable
 fun MeasureScreen(state: MeasureState, onStart: () -> Unit, onStop: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     // Surface, а не голый Column с фоном: Material3 задаёт цвет содержимого
     // только в нём. Без него текст без явного цвета рисуется чёрным — на
     // тёмной теме заголовок был почти не виден.
@@ -71,6 +77,7 @@ fun MeasureScreen(state: MeasureState, onStart: () -> Unit, onStop: () -> Unit) 
             endpointName = Endpoint.find(state.endpoint).name,
             durationSeconds = state.durationSeconds,
             running = state.running,
+            networkSummary = state.networkInfo?.summary ?: "",
             onSettings = state.onOpenSettings,
         )
 
@@ -78,10 +85,12 @@ fun MeasureScreen(state: MeasureState, onStart: () -> Unit, onStop: () -> Unit) 
         // панелях так же, и пустота под дугой не выглядит ошибкой.
         val holding = !state.running && state.liveMbps <= 0.0 && state.result != null
         val shownMbps = if (state.liveMbps > 0.0) state.liveMbps else state.result?.downloadMbps ?: 0.0
-        val shownCaption = if (state.liveMbps > 0.0) {
-            state.caption
-        } else {
-            state.result?.let { "Прошлый замер · ${formatMs(it.pingMs)}" } ?: state.caption
+        val shownCaption = when {
+            state.liveMbps > 0.0 -> state.caption
+            state.result == null -> state.caption
+            // Нулевой результат — это сбой, а не «прошлый замер».
+            state.result.downloadMbps <= 0.0 -> "Замер не удался"
+            else -> "Прошлый замер · ${formatMs(state.result.pingMs)}"
         }
 
         Gauge(
@@ -112,7 +121,23 @@ fun MeasureScreen(state: MeasureState, onStart: () -> Unit, onStop: () -> Unit) 
         }
 
         if (state.history.isNotEmpty()) {
-            HistoryBlock(history = state.history, onClear = state.onClearHistory)
+            HistoryBlock(
+                history = state.history,
+                onClear = state.onClearHistory,
+                onExportJson = {
+                    scope.launch {
+                        val file = HistoryExporter.exportJson(context, state.history)
+                        HistoryExporter.shareFile(context, file, "application/json")
+                    }
+                },
+                onExportCsv = {
+                    scope.launch {
+                        val file = HistoryExporter.exportCsv(context, state.history)
+                        HistoryExporter.shareFile(context, file, "text/csv")
+                    }
+                },
+                onDeleteRecord = state.onDeleteRecord,
+            )
             Spacer(Modifier.height(18.dp))
         } else if (state.result == null) {
             HistoryEmptyHint()
@@ -136,6 +161,7 @@ private fun AppHeader(
     endpointName: String,
     durationSeconds: Int,
     running: Boolean,
+    networkSummary: String,
     onSettings: () -> Unit,
 ) {
     Row(
@@ -158,6 +184,15 @@ private fun AppHeader(
                 ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (networkSummary.isNotBlank()) {
+                Text(
+                    text = networkSummary,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFeatureSettings = TabularFigures,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                )
+            }
         }
         IconButton(onClick = onSettings) {
             Icon(

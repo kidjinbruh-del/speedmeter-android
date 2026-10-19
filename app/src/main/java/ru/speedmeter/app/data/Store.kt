@@ -21,6 +21,17 @@ data class TestRecord(
     val pingMs: Double,
     val jitterMs: Double,
     val endpoint: String,
+    val networkKind: String = "",
+    val networkOperator: String = "",
+    val networkSsid: String = "",
+    /** Нижняя граница коридора загрузки (P10) — видно, насколько канал ровный. */
+    val downloadP10: Double = 0.0,
+    /** Верхняя граница коридора (P90). */
+    val downloadP90: Double = 0.0,
+    /** Сколько окон вошло в медиану. */
+    val samples: Int = 0,
+    /** Сколько соединений работало одновременно. */
+    val streams: Int = 0,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("at", atMillis)
@@ -29,6 +40,13 @@ data class TestRecord(
         put("ping", pingMs)
         put("jitter", jitterMs)
         put("endpoint", endpoint)
+        put("netKind", networkKind)
+        put("netOp", networkOperator)
+        put("netSsid", networkSsid)
+        put("downP10", downloadP10)
+        put("downP90", downloadP90)
+        put("samples", samples)
+        put("streams", streams)
     }
 
     companion object {
@@ -41,6 +59,13 @@ data class TestRecord(
                 pingMs = json.optDouble("ping"),
                 jitterMs = json.optDouble("jitter"),
                 endpoint = json.optString("endpoint"),
+                networkKind = json.optString("netKind"),
+                networkOperator = json.optString("netOp"),
+                networkSsid = json.optString("netSsid"),
+                downloadP10 = json.optDouble("downP10", 0.0),
+                downloadP90 = json.optDouble("downP90", 0.0),
+                samples = json.optInt("samples", 0),
+                streams = json.optInt("streams", 0),
             )
         }.getOrNull()
     }
@@ -138,6 +163,10 @@ class Store private constructor(private val prefs: SharedPreferences) {
 
     fun addRecord(record: TestRecord) {
         write(_state.value.copy(history = (listOf(record) + _state.value.history).take(MAX_HISTORY)))
+    }
+
+    fun deleteRecord(atMillis: Long) {
+        write(_state.value.copy(history = _state.value.history.filter { it.atMillis != atMillis }))
     }
 
     fun clearHistory() = write(_state.value.copy(history = emptyList()))

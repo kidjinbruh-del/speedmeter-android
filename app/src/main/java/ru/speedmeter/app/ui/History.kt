@@ -22,6 +22,9 @@ object History {
      * не рисуется.
      */
     fun deltaPercent(current: Double, previous: Double?): Int? {
+        // Нулевой текущий — это не «стало на 100% хуже», а неудачный замер.
+        // Сравнивать его с прошлым нельзя: получится «−100%» на весь экран.
+        if (current <= 0.0) return null
         if (previous == null || previous <= 0.0) return null
         val delta = (current - previous) / previous * 100.0
         if (abs(delta) < 0.5) return 0

@@ -34,7 +34,7 @@ private fun SpeedmeterRoot() {
     val saved by store.state.collectAsState()
 
     SpeedmeterTheme(accentId = saved.accentId, themeMode = saved.themeMode) {
-        val controller = rememberMeasureController(store)
+        val controller = rememberMeasureController(store, context)
         val state = controller.state
 
         MeasureScreen(state = state, onStart = controller.start, onStop = controller.stop)

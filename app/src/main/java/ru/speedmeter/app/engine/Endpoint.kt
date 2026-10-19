@@ -18,6 +18,7 @@ data class Endpoint(
     val name: String,
     val baseUrl: String,
     val note: String = "",
+    val isCustom: Boolean = false,
 ) {
     /** Ссылка на заданный объём. */
     fun downloadUrl(bytes: Long): String =
@@ -39,7 +40,12 @@ data class Endpoint(
             note = "открытый эндпоинт, без ключа",
         )
 
-        val BY_NAME = listOf(CLOUDFLARE)
+        val BY_NAME = mutableListOf(CLOUDFLARE)
+
+        fun registerCustom(endpoint: Endpoint) {
+            BY_NAME.removeAll { it.isCustom && it.name == endpoint.name }
+            BY_NAME.add(endpoint)
+        }
 
         fun find(name: String?): Endpoint = BY_NAME.firstOrNull { it.name == name } ?: CLOUDFLARE
     }

@@ -2,13 +2,18 @@ package ru.speedmeter.app.engine
 
 import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
+import kotlin.math.abs
 import kotlin.random.Random
 
 /**
@@ -17,12 +22,22 @@ import kotlin.random.Random
  * поддержки не нужны.
  *
  * Как меряем правильно:
- *  * размер файла растёт лесенкой (см. [Ramp]) — маленький файл измеряет
- *    не скорость линии, а скорость установления соединения;
- *  * первые четверть потока не учитываем: это разгон TCP и заголовки;
- *  * скорость считаем по фактически прочитанным байтам и реальному
- *    времени, а не по заявленному Content-Length — иначе обрыв на
- *    середине покажет фантастические мегабиты.
+ *  * **несколько потоков.** Один TCP-поток на канале с большой задержкой
+ *    не успевает заполнить трубу и показывает скорость ниже реальной.
+ *    Четыре параллельных соединения дают цифру, которую можно сравнивать
+ *    с тарифом провайдера;
+ *  * **окно измерения, а не «файл целиком».** После прогрева каждые 500 мс
+ *    снимается прирост байтов и времени. Из этих окон берётся медиана:
+ *    один провал в сети не переписывает результат;
+ *  * **заявленное не считается полученным.** Скорость считается только по
+ *    фактически прочитанным байтам. Если соединение оборвалось на середине,
+ *    в зачёт идёт прочитанное, а не Content-Length;
+ *  * **прогрев выбрасывается.** Первые 900 мс — это разгон TCP и TLS,
+ *    в результат они не попадают;
+ *  * **задержка — после установления соединения.** Тело ответа читается
+ *    до конца и закрывается, иначе соединение не возвращается в пул и
+ *    каждый замер снова платит за рукопожатие, показывая «пинг» в сотни
+ *    миллисекунд на самом деле быстрого канала.
  */
 class SpeedTest(private val endpoint: Endpoint) {
 
@@ -37,8 +52,17 @@ class SpeedTest(private val endpoint: Endpoint) {
         ) : Progress
     }
 
-    data class DownloadOutcome(val mbps: Double, val samples: List<Sample>)
-    data class UploadOutcome(val mbps: Double, val samples: List<Sample>)
+    data class DownloadOutcome(
+        val mbps: Double,
+        val samples: List<Sample>,
+        val stats: MetricStats,
+    )
+
+    data class UploadOutcome(
+        val mbps: Double,
+        val samples: List<Sample>,
+        val stats: MetricStats,
+    )
 
     /** Итог замера целиком — то, что показывают и кладут в историю. */
     data class Result(
@@ -48,49 +72,44 @@ class SpeedTest(private val endpoint: Endpoint) {
         val jitterMs: Double,
         val endpointName: String,
         val seconds: Long,
+        val networkSummary: String = "",
+        val downloadStats: MetricStats = MetricStats.EMPTY,
+        val uploadStats: MetricStats = MetricStats.EMPTY,
+        val streams: Int = STREAMS,
+        /** Сеть сменилась во время замера — результат нельзя сравнивать. */
+        val networkChanged: Boolean = false,
     )
 
     /**
      * Задержка и джиттер.
      *
-     * Задержка — время до первого байта ответа (TTFB). Тело у такого
-     * запроса пустое, поэтому замер засчитывается по факту успешного
-     * ответа: раньше пустой ответ считался «нет данных» и на экране
-     * появлялись нули.
-     *
-     * Перед серией делается прогрев: первый запрос платит за DNS, TCP и
-     * TLS, и на мобильном интернете это до секунды. Без прогрева
-     * «задержка» показывала время установления соединения, а не отклик
-     * сервера. Первый настоящий замер тоже отбрасывается — соединение к
-     * этому моменту ещё не прогрелось полностью.
+     * Замер — время до заголовков ответа. Первый запрос платит за DNS, TCP
+     * и TLS, поэтому он идёт в прогрев и в серию не попадает. Джиттер —
+     * медиана абсолютных разниц между соседними замерами: одна заминка
+     * сдвигает её на десятые, а не на сотни миллисекунд.
      */
-    suspend fun measureLatency(rounds: Int = 8): Pair<Double, Double> =
+    suspend fun measureLatency(rounds: Int = 10): Pair<Double, Double> =
         withContext(Dispatchers.IO) {
-            probe()
+            probe() // прогрев: DNS, TCP, TLS
             val samples = ArrayList<Double>(rounds)
             repeat(rounds) { index ->
                 val took = probe()
                 if (took != null) samples += took
-                // Пауза между запросами, иначе они сливаются в один поток.
                 if (index != rounds - 1) delay(120)
             }
-            val warm = samples.drop(1).ifEmpty { samples }
-            // Задержку берём медианой по всем замерам — медиана сама по себе
-            // устойчива. А вот джиттер считаем без самой медленной записи:
-            // одна заминка в сети иначе даёт «джиттер 600 мс», и число
-            // перестаёт что-либо говорить о канале.
-            Stats.percentile(warm, 0.5) to Stats.jitter(Stats.dropLongest(warm))
+            if (samples.isEmpty()) return@withContext 0.0 to 0.0
+            val median = Stats.median(samples)
+            val deltas = samples.zipWithNext { a, b -> abs(a - b) }
+            median to Stats.median(deltas)
         }
 
     /**
      * Один запрос с замером: [null], если сеть недоступна или ответ не 2xx.
      *
-     * Соединение намеренно не закрываем — есть шанс, что следующий запрос
-     * переиспользует его из пула keep-alive и не платит за TLS заново.
-     * На замере эффект оказался небольшим: 78 мс против 89 мс, потому что
-     * Android держит соединение не для всех запросов подряд. Хуже от
-     * этого не становится, а код остаётся тем же, что и при явном
-     * закрытии.
+     * Тело читается до конца и закрывается. Раньше читался один байт, поток
+     * не закрывался — соединение не возвращалось в пул, и следующий замер
+     * снова платил за рукопожатие. На HTTPS это давало «пинг» в разы
+     * больше настоящего.
      */
     private suspend fun probe(): Double? {
         coroutineContext.ensureActive()
@@ -99,7 +118,7 @@ class SpeedTest(private val endpoint: Endpoint) {
             val connection = open(endpoint.latencyUrl(), "GET")
             connection.connect()
             val code = connection.responseCode
-            connection.inputStream.use { stream -> stream.read() }
+            connection.inputStream.use { stream -> stream.readBytes() }
             val took = (SystemClock.elapsedRealtime() - started).toDouble()
             if (code in 200..299 && took > 0) took else null
         } catch (e: IOException) {
@@ -107,171 +126,128 @@ class SpeedTest(private val endpoint: Endpoint) {
         }
     }
 
-    /** Загрузка: лесенка размеров, пока хватает бюджета времени. */
+    /** Загрузка: несколько потоков, окно измерения после прогрева. */
     suspend fun measureDownload(
         budgetMs: Long,
         onProgress: (Progress) -> Unit = {},
     ): DownloadOutcome = withContext(Dispatchers.IO) {
-        val ramp = Ramp()
+        val deadline = SystemClock.elapsedRealtime() + budgetMs
+        val counter = AtomicLong(0)
         val samples = ArrayList<Sample>()
-        val startedAt = SystemClock.elapsedRealtime()
-        var target = ramp.size
 
-        while (true) {
-            val left = budgetMs - (SystemClock.elapsedRealtime() - startedAt)
-            if (left <= 0 || ramp.size >= ramp.maxBytes) break
-
-            onProgress(Progress.Phase("Загрузка · файл ${Fmt.one(megabytes(target))} МБ"))
-            val sample = downloadOnce(target) { mbps, bytes ->
-                onProgress(Progress.Running(mbps, bytes, target))
+        onProgress(Progress.Phase("Загрузка · $STREAMS потока"))
+        coroutineScope {
+            val jobs = (1..STREAMS).map {
+                launch { downloadStream(counter) }
             }
-            if (sample != null) {
-                samples += sample
-                onProgress(
-                    Progress.Running(sample.mbps, sample.bytes, target, done = true),
-                )
-            }
-            target = ramp.next(sample)
+            collect(counter, deadline, MAX_DOWNLOAD_BYTES, onProgress, samples)
+            jobs.forEach(Job::cancel)
         }
 
-        DownloadOutcome(Stats.summary(samples.map { it.mbps }), samples)
+        DownloadOutcome(Stats.summary(samples.map { it.mbps }), samples, MetricStats.of(samples.map { it.mbps }))
     }
 
-    /** Отдача: та же лесенка, но поменьше — загрузка съедает трафик быстрее. */
+    /** Отдача: те же правила, но потолок трафика ниже. */
     suspend fun measureUpload(
         budgetMs: Long,
         onProgress: (Progress) -> Unit = {},
     ): UploadOutcome = withContext(Dispatchers.IO) {
-        val ramp = Ramp(
-            firstBytes = 500_000,
-            minBytes = 500_000,
-            maxBytes = 25_000_000,
-            fastMs = 2_000,
-        )
+        val deadline = SystemClock.elapsedRealtime() + budgetMs
+        val counter = AtomicLong(0)
         val samples = ArrayList<Sample>()
-        val startedAt = SystemClock.elapsedRealtime()
-        var target = ramp.size
         // Случайные байты, а не нули: нули сервер принимает «в полтора раза
         // быстрее», чем они ушли по проводу, и замер соврёт в свою пользу.
         val chunk = Random.nextBytes(64 * 1024)
 
-        while (true) {
-            val left = budgetMs - (SystemClock.elapsedRealtime() - startedAt)
-            if (left <= 0 || ramp.size >= ramp.maxBytes) break
-
-            onProgress(Progress.Phase("Отдача · отправляем ${Fmt.one(megabytes(target))} МБ"))
-            val sample = uploadOnce(target, chunk) { mbps, bytes ->
-                onProgress(Progress.Running(mbps, bytes, target))
+        onProgress(Progress.Phase("Отдача · $STREAMS потока"))
+        coroutineScope {
+            val jobs = (1..STREAMS).map {
+                launch { uploadStream(counter, chunk) }
             }
-            if (sample != null) {
-                samples += sample
-                onProgress(
-                    Progress.Running(sample.mbps, sample.bytes, target, done = true),
-                )
-            }
-            target = ramp.next(sample)
+            collect(counter, deadline, MAX_UPLOAD_BYTES, onProgress, samples)
+            jobs.forEach(Job::cancel)
         }
 
-        UploadOutcome(Stats.summary(samples.map { it.mbps }), samples)
+        UploadOutcome(Stats.summary(samples.map { it.mbps }), samples, MetricStats.of(samples.map { it.mbps }))
     }
 
     /**
-     * Один загрузочный замер [target] байт.
+     * Снимает окна по 500 мс и складывает их в [sink].
      *
-     * Возвращает Sample только если скорость считалась дольше 200 мс:
-     * на коротком отрезке SystemClock.elapsedRealtime() даёт 0, и деление
-     * даёт бесконечность.
+     * Первые [WARMUP_MS] не учитываются: это разгон. Дальше каждое окно —
+     * это реально полученные байты за реально прошедшее время.
      */
-    private suspend fun downloadOnce(
-        target: Long,
-        onTick: (Double, Long) -> Unit,
-    ): Sample? {
-        val connection = open(endpoint.downloadUrl(target), "GET")
-        try {
-            connection.connect()
-            val stream = connection.inputStream
-            val buffer = ByteArray(BUFFER)
-            val warmup = (target / 4).coerceAtLeast(1)
-            var raw = 0L
-            var counted = 0L
-            var speedStarted = 0L
-
-            while (raw < target) {
-                coroutineContext.ensureActive()
-                val read = stream.read(buffer)
-                if (read < 0) break
-                raw += read
-                if (speedStarted == 0L && raw >= warmup) {
-                    speedStarted = SystemClock.elapsedRealtime()
-                }
-                if (speedStarted > 0L) {
-                    counted += read
-                    val seconds = (SystemClock.elapsedRealtime() - speedStarted) / 1000.0
-                    if (seconds >= 0.2) {
-                        onTick(counted * 8.0 / seconds / 1_000_000.0, counted)
-                    }
-                }
-            }
-            stream.close()
-
-            val millis = SystemClock.elapsedRealtime() - speedStarted
-            return if (speedStarted > 0L && millis >= 200) {
-                Sample(counted.coerceAtLeast(1), millis)
-            } else {
-                null
-            }
-        } catch (e: IOException) {
-            return null
-        } finally {
-            connection.disconnect()
+    private suspend fun collect(
+        counter: AtomicLong,
+        deadline: Long,
+        cap: Long,
+        onProgress: (Progress) -> Unit,
+        sink: MutableList<Sample>,
+    ) {
+        delay(WARMUP_MS)
+        var lastBytes = counter.get()
+        var lastAt = SystemClock.elapsedRealtime()
+        while (SystemClock.elapsedRealtime() < deadline && counter.get() < cap) {
+            delay(SAMPLE_MS)
+            val now = SystemClock.elapsedRealtime()
+            val bytes = counter.get()
+            val deltaBytes = bytes - lastBytes
+            val deltaMs = now - lastAt
+            lastBytes = bytes
+            lastAt = now
+            if (deltaBytes <= 0 || deltaMs <= 0) continue
+            val sample = Sample(deltaBytes, deltaMs)
+            sink += sample
+            onProgress(Progress.Running(sample.mbps, bytes, cap))
         }
     }
 
-    private suspend fun uploadOnce(
-        target: Long,
-        chunk: ByteArray,
-        onTick: (Double, Long) -> Unit,
-    ): Sample? {
-        val connection = open(endpoint.uploadUrl(), "POST")
+    private suspend fun downloadStream(counter: AtomicLong) {
+        var connection: HttpURLConnection? = null
         try {
-            connection.doOutput = true
-            connection.setFixedLengthStreamingMode(target)
-            val warmup = target / 4
-            val started = SystemClock.elapsedRealtime()
-            var speedStarted = 0L
-            var sent = 0L
-            val out = connection.outputStream
+            connection = open(endpoint.downloadUrl(PER_STREAM_DOWNLOAD), "GET")
+            connection.connect()
+            connection.inputStream.use { input ->
+                val buffer = ByteArray(BUFFER)
+                while (counter.get() < MAX_DOWNLOAD_BYTES) {
+                    coroutineContext.ensureActive()
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    counter.addAndGet(read.toLong())
+                }
+            }
+        } catch (e: Exception) {
+            // обрыв или отмена — поток закончился, остальные продолжают
+        } finally {
+            connection?.disconnect()
+        }
+    }
 
-            while (sent < target) {
+    private suspend fun uploadStream(counter: AtomicLong, chunk: ByteArray) {
+        var connection: HttpURLConnection? = null
+        try {
+            connection = open(endpoint.uploadUrl(), "POST")
+            connection.doOutput = true
+            connection.setFixedLengthStreamingMode(PER_STREAM_UPLOAD)
+            val out = connection.outputStream
+            var sent = 0L
+            while (sent < PER_STREAM_UPLOAD && counter.get() < MAX_UPLOAD_BYTES) {
                 coroutineContext.ensureActive()
-                val size = minOf(chunk.size.toLong(), target - sent).toInt()
+                val size = minOf(chunk.size.toLong(), PER_STREAM_UPLOAD - sent).toInt()
                 out.write(chunk, 0, size)
                 out.flush()
                 sent += size
-                if (speedStarted == 0L && sent >= warmup) {
-                    speedStarted = SystemClock.elapsedRealtime()
-                }
-                if (speedStarted > 0L) {
-                    val seconds = (SystemClock.elapsedRealtime() - speedStarted) / 1000.0
-                    if (seconds >= 0.2) {
-                        onTick((sent - warmup) * 8.0 / seconds / 1_000_000.0, sent - warmup)
-                    }
-                }
+                counter.addAndGet(size.toLong())
             }
-            out.close()
-            // Сервер обязан ответить: иначе мы мерили не сеть, а буфер.
-            connection.inputStream.use { it.read(ByteArray(1024)) }
-
-            val millis = SystemClock.elapsedRealtime() - speedStarted
-            return if (speedStarted > 0L && millis >= 200) {
-                Sample((sent - warmup).coerceAtLeast(1), millis)
-            } else {
-                null
+            try {
+                out.close()
+            } catch (_: Exception) {
+                // поток обрезан отменой — сервер вернёт ошибку, она не нужна
             }
-        } catch (e: IOException) {
-            return null
+        } catch (e: Exception) {
+            // обрыв или отмена
         } finally {
-            connection.disconnect()
+            connection?.disconnect()
         }
     }
 
@@ -285,16 +261,24 @@ class SpeedTest(private val endpoint: Endpoint) {
         // gzip и мы посчитаем сжатый объём вместо реального трафика.
         connection.setRequestProperty("Accept-Encoding", "identity")
         connection.setRequestProperty("Cache-Control", "no-cache")
+        connection.setRequestProperty("Connection", "keep-alive")
         connection.setRequestProperty("User-Agent", USER_AGENT)
         return connection
     }
 
-    private fun megabytes(bytes: Long): Double = bytes / 1_000_000.0
+    companion object {
+        /** Потоков на замер: одно соединение не заполняет канал с большой задержкой. */
+        const val STREAMS = 4
 
-    private companion object {
-        const val BUFFER = 128 * 1024
-        const val CONNECT_TIMEOUT_MS = 8_000
-        const val READ_TIMEOUT_MS = 12_000
-        const val USER_AGENT = "SpeedmeterAndroid/1.0"
+        private const val BUFFER = 128 * 1024
+        private const val SAMPLE_MS = 500L
+        private const val WARMUP_MS = 900L
+        private const val MAX_DOWNLOAD_BYTES = 60_000_000L
+        private const val MAX_UPLOAD_BYTES = 30_000_000L
+        private const val PER_STREAM_DOWNLOAD = 20_000_000L
+        private const val PER_STREAM_UPLOAD = 10_000_000L
+        private const val CONNECT_TIMEOUT_MS = 8_000
+        private const val READ_TIMEOUT_MS = 12_000
+        private const val USER_AGENT = "SpeedmeterAndroid/1.2"
     }
 }

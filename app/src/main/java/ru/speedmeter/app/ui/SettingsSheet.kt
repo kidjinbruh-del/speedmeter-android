@@ -22,13 +22,24 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -201,6 +212,41 @@ fun SettingsSheetContent(state: MeasureState, onDismiss: () -> Unit) {
                 )
                 Spacer(Modifier.height(8.dp))
             }
+            if (state.customServerDialogOpen) {
+                CustomServerDialog(
+                    onDismiss = { state.onCustomServerDialogOpen(false) },
+                    onConfirm = { name, url ->
+                        Endpoint.registerCustom(Endpoint(name, url, "свой сервер", isCustom = true))
+                        state.onEndpoint(name)
+                        state.onCustomServerDialogOpen(false)
+                    },
+                )
+            }
+            TextButton(
+                onClick = { state.onCustomServerDialogOpen(true) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Добавить свой сервер")
+            }
+            if (Endpoint.BY_NAME.any { it.isCustom }) {
+                TextButton(
+                    onClick = {
+                        Endpoint.BY_NAME.filter { it.isCustom }.forEach {
+                            Endpoint.BY_NAME.remove(it)
+                        }
+                        state.onEndpoint(Endpoint.CLOUDFLARE.name)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Удалить свои серверы")
+                }
+            }
 
             Spacer(Modifier.height(22.dp))
             Text(
@@ -215,6 +261,66 @@ fun SettingsSheetContent(state: MeasureState, onDismiss: () -> Unit) {
             Spacer(Modifier.height(56.dp))
         }
     }
+}
+
+/**
+ * Диалог добавления своего сервера.
+ *
+ * Шаблон `{bytes}` в URL заменяется на размер файла: `http://192.168.1.10/speed-{bytes}.bin`.
+ * Без шаблона используется схема Cloudflare: `/__down?bytes=N` и `/__up`.
+ */
+@Composable
+fun CustomServerDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, url: String) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    val valid = name.isNotBlank() && url.isNotBlank() && (url.startsWith("http://") || url.startsWith("https://"))
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Свой сервер") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Название") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("URL") },
+                    placeholder = { Text("http://192.168.1.10/speed-{bytes}.bin") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Используйте {bytes} в URL для размера файла. Без него — схема Cloudflare.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name.trim(), url.trim()) },
+                enabled = valid,
+            ) {
+                Text("Добавить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        },
+    )
 }
 
 /**

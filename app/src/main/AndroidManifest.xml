@@ -7,6 +7,14 @@
          читает то, что само скачало. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Обратная связь нажатия. Normal-разрешение: не спрашивается у
+         пользователя. Без него vibrate() бросает SecurityException —
+         именно так приложение падало при нажатии «Измерить». -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Для SSID и уровня сигнала Wi-Fi. Normal-разрешение: не требует
+         запроса у пользователя. Сотовый сигнал намеренно не читаем —
+         он требует READ_PHONE_STATE (dangerous). -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
     <application
         android:allowBackup="true"
@@ -29,6 +37,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

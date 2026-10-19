@@ -8,12 +8,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import ru.speedmeter.app.data.Store
 import ru.speedmeter.app.data.TestRecord
 import ru.speedmeter.app.engine.Endpoint
+import ru.speedmeter.app.engine.MetricStats
+import ru.speedmeter.app.engine.NetworkInfo
+import ru.speedmeter.app.engine.NetworkProbe
 import ru.speedmeter.app.engine.SpeedTest
 import ru.speedmeter.app.engine.Stats
 import ru.speedmeter.app.ui.theme.Accents
@@ -26,8 +30,6 @@ data class MeasureState(
     val liveMbps: Double = 0.0,
     val ceilingMbps: Double = 1.0,
     val progress: Float = 0f,
-    // Подпись не повторяет текст кнопки: иначе поиск по надписи находит
-    // подпись датчика вместо самой кнопки и тап уходит мимо.
     val caption: String = "Готов к замеру",
     val result: SpeedTest.Result? = null,
     val history: List<TestRecord> = emptyList(),
@@ -38,7 +40,11 @@ data class MeasureState(
     val themeMode: ThemeMode = ThemeMode.DEFAULT,
     val gaugeStyle: GaugeStyle = GaugeStyle.DEFAULT,
     val settingsOpen: Boolean = false,
+    val networkInfo: NetworkInfo? = null,
+    val customServerDialogOpen: Boolean = false,
     val onClearHistory: () -> Unit = {},
+    val onDeleteRecord: (Long) -> Unit = {},
+    val onCustomServerDialogOpen: (Boolean) -> Unit = {},
     val onDuration: (Int) -> Unit = {},
     val onMeasureUpload: (Boolean) -> Unit = {},
     val onEndpoint: (String) -> Unit = {},
@@ -57,7 +63,7 @@ data class MeasureState(
  * ViewModel здесь добавила бы класс файлов без единого выигрыша.
  */
 @Composable
-fun rememberMeasureController(store: Store): MeasureController {
+fun rememberMeasureController(store: Store, context: android.content.Context): MeasureController {
     val scope = rememberCoroutineScope()
     val saved by store.state.collectAsState()
 
@@ -68,7 +74,9 @@ fun rememberMeasureController(store: Store): MeasureController {
     var ceiling by remember { mutableStateOf(1.0) }
     var result by remember { mutableStateOf<SpeedTest.Result?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var customServerDialogOpen by remember { mutableStateOf(false) }
     var job by remember { mutableStateOf<Job?>(null) }
+    var networkInfo by remember { mutableStateOf<NetworkInfo?>(null) }
 
     fun start() {
         if (running) return
@@ -85,6 +93,8 @@ fun rememberMeasureController(store: Store): MeasureController {
         val budgetMs = saved.durationMs
         val withUpload = saved.measureUpload
         val engine = SpeedTest(endpoint)
+        val netBefore = NetworkProbe.current(context)
+        networkInfo = netBefore
 
         job = scope.launch {
             val started = System.currentTimeMillis()
@@ -109,6 +119,7 @@ fun rememberMeasureController(store: Store): MeasureController {
                 }
 
                 var upload = 0.0
+                var uploadStats = MetricStats.EMPTY
                 if (withUpload) {
                     caption = "Отдача"
                     progress = 0f
@@ -128,7 +139,14 @@ fun rememberMeasureController(store: Store): MeasureController {
                         }
                     }
                     upload = outcome.mbps
+                    uploadStats = outcome.stats
                 }
+
+                // Если сеть сменилась посреди замера (Wi-Fi → LTE), медиана
+                // становится смесью двух разных каналов — такому результату
+                // нельзя верить и нельзя сравнивать его с тарифом.
+                val netAfter = NetworkProbe.current(context)
+                val networkChanged = netAfter.summary != netBefore.summary
 
                 val final = SpeedTest.Result(
                     downloadMbps = download.mbps,
@@ -137,21 +155,42 @@ fun rememberMeasureController(store: Store): MeasureController {
                     jitterMs = jitter,
                     endpointName = endpoint.name,
                     seconds = (System.currentTimeMillis() - started) / 1000,
+                    networkSummary = networkInfo?.summary ?: "",
+                    downloadStats = download.stats,
+                    uploadStats = uploadStats,
+                    streams = SpeedTest.STREAMS,
+                    networkChanged = networkChanged,
                 )
                 result = final
                 live = download.mbps
                 ceiling = Stats.gaugeCeiling(download.mbps)
-                caption = "Готово за ${final.seconds} с"
-                store.addRecord(
-                    TestRecord(
-                        atMillis = started,
-                        downloadMbps = final.downloadMbps,
-                        uploadMbps = final.uploadMbps,
-                        pingMs = final.pingMs,
-                        jitterMs = final.jitterMs,
-                        endpoint = final.endpointName,
-                    ),
-                )
+                caption = when {
+                    download.mbps <= 0.0 -> "Замер не удался: сервер не отдал данные"
+                    networkChanged -> "Сеть сменилась во время замера — цифры несравнимы"
+                    else -> "Готово за ${final.seconds} с"
+                }
+
+                // Неудачный замер в историю не пишем: ноль в списке выглядит
+                // как реальная скорость 0 Мбит/с, а не как сбой.
+                if (download.mbps > 0.0) {
+                    store.addRecord(
+                        TestRecord(
+                            atMillis = started,
+                            downloadMbps = final.downloadMbps,
+                            uploadMbps = final.uploadMbps,
+                            pingMs = final.pingMs,
+                            jitterMs = final.jitterMs,
+                            endpoint = final.endpointName,
+                            networkKind = networkInfo?.kind?.name ?: "",
+                            networkOperator = networkInfo?.operator ?: "",
+                            networkSsid = networkInfo?.ssid ?: "",
+                            downloadP10 = download.stats.p10,
+                            downloadP90 = download.stats.p90,
+                            samples = download.stats.count,
+                            streams = SpeedTest.STREAMS,
+                        ),
+                    )
+                }
             } catch (e: CancellationException) {
                 caption = "Прервано"
                 throw e
@@ -188,7 +227,11 @@ fun rememberMeasureController(store: Store): MeasureController {
             themeMode = saved.themeMode,
             gaugeStyle = saved.gaugeStyle,
             settingsOpen = settingsOpen,
+            customServerDialogOpen = customServerDialogOpen,
+            networkInfo = networkInfo,
             onClearHistory = store::clearHistory,
+            onDeleteRecord = store::deleteRecord,
+            onCustomServerDialogOpen = { customServerDialogOpen = it },
             onDuration = store::setDuration,
             onMeasureUpload = store::setMeasureUpload,
             onEndpoint = store::setEndpoint,
