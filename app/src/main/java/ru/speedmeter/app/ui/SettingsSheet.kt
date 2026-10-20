@@ -33,7 +33,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -195,7 +194,8 @@ fun SettingsSheetContent(state: MeasureState, onDismiss: () -> Unit) {
 
             SectionLabel("Сервер замера")
             Spacer(Modifier.height(10.dp))
-            Endpoint.BY_NAME.forEach { endpoint ->
+            val servers = listOf(Endpoint.CLOUDFLARE) + state.customServers
+            servers.forEach { endpoint ->
                 SelectRow(
                     title = endpoint.name,
                     subtitle = endpoint.note,
@@ -216,8 +216,7 @@ fun SettingsSheetContent(state: MeasureState, onDismiss: () -> Unit) {
                 CustomServerDialog(
                     onDismiss = { state.onCustomServerDialogOpen(false) },
                     onConfirm = { name, url ->
-                        Endpoint.registerCustom(Endpoint(name, url, "свой сервер", isCustom = true))
-                        state.onEndpoint(name)
+                        state.onAddCustomServer(name, url)
                         state.onCustomServerDialogOpen(false)
                     },
                 )
@@ -234,14 +233,9 @@ fun SettingsSheetContent(state: MeasureState, onDismiss: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 Text("Добавить свой сервер")
             }
-            if (Endpoint.BY_NAME.any { it.isCustom }) {
+            if (state.customServers.isNotEmpty()) {
                 TextButton(
-                    onClick = {
-                        Endpoint.BY_NAME.filter { it.isCustom }.forEach {
-                            Endpoint.BY_NAME.remove(it)
-                        }
-                        state.onEndpoint(Endpoint.CLOUDFLARE.name)
-                    },
+                    onClick = state.onRemoveCustomServers,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Удалить свои серверы")
@@ -276,7 +270,9 @@ fun CustomServerDialog(
 ) {
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
-    val valid = name.isNotBlank() && url.isNotBlank() && (url.startsWith("http://") || url.startsWith("https://"))
+    val reserved = name.trim().equals(Endpoint.CLOUDFLARE.name, ignoreCase = true)
+    val valid = name.isNotBlank() && url.isNotBlank() &&
+        (url.startsWith("http://") || url.startsWith("https://")) && !reserved
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -301,9 +297,17 @@ fun CustomServerDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Используйте {bytes} в URL для размера файла. Без него — схема Cloudflare.",
+                    text = if (reserved) {
+                        "Это имя занято встроенным сервером. Выберите другое."
+                    } else {
+                        "Используйте {bytes} в URL для размера файла. Без него — схема Cloudflare."
+                    },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (reserved) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
         },

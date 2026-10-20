@@ -89,6 +89,7 @@ class Store private constructor(private val prefs: SharedPreferences) {
         val accentId: String = Accents.DEFAULT.id,
         val themeModeName: String = ThemeMode.DEFAULT.name,
         val gaugeStyleName: String = GaugeStyle.DEFAULT.name,
+        val customServers: List<Endpoint> = emptyList(),
         val history: List<TestRecord> = emptyList(),
     ) {
         val durationMs: Long get() = durationSeconds * 1000L
@@ -111,23 +112,57 @@ class Store private constructor(private val prefs: SharedPreferences) {
                 }
             }.getOrDefault(emptyList())
         }
+        // Свои серверы описываются пользователем и живут вне кода, поэтому
+        // их нужно вернуть в реестр до чтения выбранного эндпоинта: иначе
+        // после перезапуска имя сохранённого сервера ни на что не указывает.
+        val customServers = readCustomServers().filter { Endpoint.registerCustom(it) }
+        val savedEndpoint = prefs.getString(KEY_ENDPOINT, Endpoint.CLOUDFLARE.name)
+            ?: Endpoint.CLOUDFLARE.name
         return State(
             durationSeconds = prefs.getInt(KEY_DURATION, DEFAULT_DURATION),
             measureUpload = prefs.getBoolean(KEY_UPLOAD, true),
-            endpoint = prefs.getString(KEY_ENDPOINT, Endpoint.CLOUDFLARE.name)
+            endpoint = savedEndpoint.takeIf { name -> Endpoint.BY_NAME.any { it.name == name } }
                 ?: Endpoint.CLOUDFLARE.name,
             accentId = prefs.getString(KEY_ACCENT, Accents.DEFAULT.id) ?: Accents.DEFAULT.id,
             themeModeName = prefs.getString(KEY_THEME, ThemeMode.DEFAULT.name)
                 ?: ThemeMode.DEFAULT.name,
             gaugeStyleName = prefs.getString(KEY_GAUGE, GaugeStyle.DEFAULT.name)
                 ?: GaugeStyle.DEFAULT.name,
+            customServers = customServers,
             history = records,
         )
+    }
+
+    private fun readCustomServers(): List<Endpoint> {
+        val raw = prefs.getString(KEY_SERVERS, null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            (0 until array.length()).mapNotNull { i ->
+                val item = array.optJSONObject(i) ?: return@mapNotNull null
+                val name = item.optString("name").trim()
+                val url = item.optString("url").trim()
+                if (name.isEmpty() || !isValidCustomUrl(url)) return@mapNotNull null
+                Endpoint(
+                    name = name,
+                    baseUrl = url,
+                    note = "свой сервер",
+                    isCustom = true,
+                )
+            }.distinctBy { it.name }
+        }.getOrDefault(emptyList())
     }
 
     private fun write(state: State) {
         val array = JSONArray()
         state.history.forEach { array.put(it.toJson()) }
+        val servers = JSONArray()
+        state.customServers.forEach { endpoint ->
+            servers.put(
+                JSONObject()
+                    .put("name", endpoint.name)
+                    .put("url", endpoint.baseUrl),
+            )
+        }
         prefs.edit()
             .putInt(KEY_DURATION, state.durationSeconds)
             .putBoolean(KEY_UPLOAD, state.measureUpload)
@@ -135,6 +170,7 @@ class Store private constructor(private val prefs: SharedPreferences) {
             .putString(KEY_ACCENT, state.accentId)
             .putString(KEY_THEME, state.themeModeName)
             .putString(KEY_GAUGE, state.gaugeStyleName)
+            .putString(KEY_SERVERS, servers.toString())
             .putString(KEY_HISTORY, array.toString())
             .apply()
         _state.value = state
@@ -150,6 +186,40 @@ class Store private constructor(private val prefs: SharedPreferences) {
     fun setEndpoint(name: String) {
         if (Endpoint.BY_NAME.none { it.name == name }) return
         write(_state.value.copy(endpoint = name))
+    }
+
+    fun addCustomServer(name: String, url: String) {
+        val cleanName = name.trim()
+        val cleanUrl = url.trim()
+        if (cleanName.isEmpty() || !isValidCustomUrl(cleanUrl)) return
+        val endpoint = Endpoint(
+            name = cleanName,
+            baseUrl = cleanUrl,
+            note = "свой сервер",
+            isCustom = true,
+        )
+        // Реестр — источник истины для замера, состояние — для интерфейса.
+        // Если имя занято встроенным сервером, не сохраняем ничего.
+        if (!Endpoint.registerCustom(endpoint)) return
+        val servers = _state.value.customServers
+            .filterNot { it.name == cleanName } + endpoint
+        write(
+            _state.value.copy(
+                customServers = servers,
+                endpoint = cleanName,
+            ),
+        )
+    }
+
+    fun removeCustomServers() {
+        val wasSelected = _state.value.customServers.any { it.name == _state.value.endpoint }
+        Endpoint.unregisterCustoms()
+        write(
+            _state.value.copy(
+                customServers = emptyList(),
+                endpoint = if (wasSelected) Endpoint.CLOUDFLARE.name else _state.value.endpoint,
+            ),
+        )
     }
 
     fun setAccent(id: String) {
@@ -184,6 +254,11 @@ class Store private constructor(private val prefs: SharedPreferences) {
         private const val KEY_ACCENT = "accent"
         private const val KEY_THEME = "theme"
         private const val KEY_GAUGE = "gauge"
+        private const val KEY_SERVERS = "servers"
+
+        /** Свой сервер должен быть HTTP(S), иначе движок не сможет к нему подключиться. */
+        private fun isValidCustomUrl(url: String): Boolean =
+            url.startsWith("http://") || url.startsWith("https://")
 
         fun of(context: Context): Store = Store(
             context.getSharedPreferences("speedmeter", Context.MODE_PRIVATE),

@@ -42,9 +42,18 @@ data class Endpoint(
 
         val BY_NAME = mutableListOf(CLOUDFLARE)
 
-        fun registerCustom(endpoint: Endpoint) {
+        fun registerCustom(endpoint: Endpoint): Boolean {
+            if (endpoint.name.isBlank()) return false
+            // Встроенный сервер перекрывать нельзя: иначе «Cloudflare»
+            // в списке будет вести на чужой адрес.
+            if (BY_NAME.any { !it.isCustom && it.name == endpoint.name }) return false
             BY_NAME.removeAll { it.isCustom && it.name == endpoint.name }
             BY_NAME.add(endpoint)
+            return true
+        }
+
+        fun unregisterCustoms() {
+            BY_NAME.removeAll { it.isCustom }
         }
 
         fun find(name: String?): Endpoint = BY_NAME.firstOrNull { it.name == name } ?: CLOUDFLARE

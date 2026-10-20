@@ -1,6 +1,7 @@
 package ru.speedmeter.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ru.speedmeter.app.engine.Endpoint
@@ -58,5 +59,24 @@ class EndpointCustomTest {
         assertEquals(1, custom.size)
         assertEquals("http://10.0.0.2/speed-{bytes}.bin", custom[0].baseUrl)
         Endpoint.BY_NAME.removeAll { it.isCustom }
+    }
+
+    @Test
+    fun `registerCustom не перекрывает встроенный сервер`() {
+        val before = Endpoint.BY_NAME.size
+        val added = Endpoint.registerCustom(
+            Endpoint("Cloudflare", "http://evil.example", isCustom = true),
+        )
+        assertFalse(added)
+        assertEquals(before, Endpoint.BY_NAME.size)
+        assertEquals(Endpoint.CLOUDFLARE.baseUrl, Endpoint.find("Cloudflare").baseUrl)
+    }
+
+    @Test
+    fun `unregisterCustoms удаляет только свои серверы`() {
+        Endpoint.registerCustom(Endpoint("Домашний", "http://10.0.0.1/speed-{bytes}.bin", isCustom = true))
+        Endpoint.unregisterCustoms()
+        assertTrue(Endpoint.BY_NAME.none { it.isCustom })
+        assertTrue(Endpoint.BY_NAME.any { it == Endpoint.CLOUDFLARE })
     }
 }
