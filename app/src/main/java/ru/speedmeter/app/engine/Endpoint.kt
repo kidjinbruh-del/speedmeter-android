@@ -28,7 +28,13 @@ data class Endpoint(
             baseUrl.trimEnd('/') + "/__down?bytes=" + bytes
         }
 
-    fun uploadUrl(): String = baseUrl.trimEnd('/') + "/__up"
+    /**
+     * Ссылка на отдачу. Для серверов-шаблонов ({bytes}) путь отдачи неизвестен —
+     * возвращается пустая строка, и замер отдачи для них пропускается: шлём
+     * POST в никуда — это не замер, а генерация трафика.
+     */
+    fun uploadUrl(): String =
+        if (baseUrl.contains("{bytes}")) "" else baseUrl.trimEnd('/') + "/__up"
 
     /** Маленький запрос для замера задержки: ответ быстрый, тело пустое. */
     fun latencyUrl(): String = downloadUrl(0)
@@ -40,7 +46,8 @@ data class Endpoint(
             note = "открытый эндпоинт, без ключа",
         )
 
-        val BY_NAME = mutableListOf(CLOUDFLARE)
+        /** CopyOnWriteArrayList: читают из IO-потоков замера, пишут из UI — без блокировок и гонок. */
+        val BY_NAME: MutableList<Endpoint> = java.util.concurrent.CopyOnWriteArrayList(listOf(CLOUDFLARE))
 
         fun registerCustom(endpoint: Endpoint): Boolean {
             if (endpoint.name.isBlank()) return false

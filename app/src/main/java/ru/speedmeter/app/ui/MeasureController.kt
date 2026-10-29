@@ -102,7 +102,14 @@ fun rememberMeasureController(store: Store, context: android.content.Context): M
         job = scope.launch {
             val started = System.currentTimeMillis()
             try {
-                val (ping, jitter) = engine.measureLatency()
+                val latency = engine.measureLatency()
+                if (latency == null) {
+                    // Ни один запрос не прошёл: пинг 0 в истории выглядел бы
+                    // как идеальная сеть, поэтому замер просто не выполняется.
+                    caption = "Сеть недоступна — замер не выполнен"
+                    return@launch
+                }
+                val (ping, jitter) = latency
 
                 caption = "Загрузка"
                 val download = engine.measureDownload(if (withUpload) budgetMs / 2 else budgetMs) { p ->
@@ -121,9 +128,12 @@ fun rememberMeasureController(store: Store, context: android.content.Context): M
                     }
                 }
 
+                // Шаблонному серверу ({bytes}) некуда отправлять отдачу —
+                // фаза пропускается, чтобы не генерировать трафик в никуда.
+                val canUpload = withUpload && endpoint.uploadUrl().isNotEmpty()
                 var upload = 0.0
                 var uploadStats = MetricStats.EMPTY
-                if (withUpload) {
+                if (canUpload) {
                     caption = "Отдача"
                     progress = 0f
                     val outcome = engine.measureUpload(budgetMs / 2) { p ->

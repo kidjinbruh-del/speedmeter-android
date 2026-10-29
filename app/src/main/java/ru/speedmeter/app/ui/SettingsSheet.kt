@@ -297,6 +297,13 @@ fun CustomServerDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
+                    text = "Приём: {сервер}/__down?bytes=N. Отдача меряется POST-ом на {сервер}/__up — " +
+                        "для сервера-шаблона ({bytes}) отдача недоступна, будет измерена только загрузка.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
                     text = if (reserved) {
                         "Это имя занято встроенным сервером. Выберите другое."
                     } else {

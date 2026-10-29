@@ -91,10 +91,19 @@ object NetworkProbe {
         tm?.networkOperatorName?.takeIf { it.isNotBlank() } ?: ""
     }.getOrDefault("")
 
+    /**
+     * SSID без геолокации система не отдаёт: на Android 8+ вместо имени
+     * приходит «<unknown ssid>», на части устройств — «0x…». И то и другое
+     * вырезаем, чтобы в шапке не появлялся мусор; имя сети показываем,
+     * только если система его действительно вернула.
+     */
     @Suppress("DEPRECATION")
     private fun readSsid(wm: WifiManager?): String? = runCatching {
-        val raw = wm?.connectionInfo?.ssid
-        raw?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
+        wm?.connectionInfo?.ssid
+            ?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
+            ?.trim()
+            ?.removeSurrounding("\"")
+            ?.takeIf { it.isNotBlank() && !it.startsWith("0x") }
     }.getOrNull()
 
     private fun readWifiSignal(wm: WifiManager?): Int? = runCatching {

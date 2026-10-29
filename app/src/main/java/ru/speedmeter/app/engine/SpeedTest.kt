@@ -88,7 +88,8 @@ class SpeedTest(private val endpoint: Endpoint) {
      * медиана абсолютных разниц между соседними замерами: одна заминка
      * сдвигает её на десятые, а не на сотни миллисекунд.
      */
-    suspend fun measureLatency(rounds: Int = 10): Pair<Double, Double> =
+    /** null — сеть недоступна совсем: ни один запрос не прошёл. */
+    suspend fun measureLatency(rounds: Int = 10): Pair<Double, Double>? =
         withContext(Dispatchers.IO) {
             probe() // прогрев: DNS, TCP, TLS
             val samples = ArrayList<Double>(rounds)
@@ -97,7 +98,7 @@ class SpeedTest(private val endpoint: Endpoint) {
                 if (took != null) samples += took
                 if (index != rounds - 1) delay(120)
             }
-            if (samples.isEmpty()) return@withContext 0.0 to 0.0
+            if (samples.isEmpty()) return@withContext null
             val median = Stats.median(samples)
             val deltas = samples.zipWithNext { a, b -> abs(a - b) }
             median to Stats.median(deltas)
@@ -152,6 +153,11 @@ class SpeedTest(private val endpoint: Endpoint) {
         budgetMs: Long,
         onProgress: (Progress) -> Unit = {},
     ): UploadOutcome = withContext(Dispatchers.IO) {
+        // Шаблонному серверу ({bytes}) некуда отправлять — отдачу не имитируем.
+        if (endpoint.uploadUrl().isEmpty()) {
+            onProgress(Progress.Phase("Отдача недоступна для этого сервера"))
+            return@withContext UploadOutcome(0.0, emptyList(), MetricStats.EMPTY)
+        }
         val deadline = SystemClock.elapsedRealtime() + budgetMs
         val counter = AtomicLong(0)
         val samples = ArrayList<Sample>()
@@ -209,9 +215,13 @@ class SpeedTest(private val endpoint: Endpoint) {
             connection.connect()
             connection.inputStream.use { input ->
                 val buffer = ByteArray(BUFFER)
-                while (counter.get() < MAX_DOWNLOAD_BYTES) {
+                while (true) {
                     coroutineContext.ensureActive()
-                    val read = input.read(buffer)
+                    // Читаем строго в пределах общего капа: иначе последний
+                    // кусок каждого из четырёх потоков перекачивает лимит.
+                    val want = minOf(BUFFER.toLong(), MAX_DOWNLOAD_BYTES - counter.get()).toInt()
+                    if (want <= 0) break
+                    val read = input.read(buffer, 0, want)
                     if (read < 0) break
                     counter.addAndGet(read.toLong())
                 }
@@ -233,7 +243,12 @@ class SpeedTest(private val endpoint: Endpoint) {
             var sent = 0L
             while (sent < PER_STREAM_UPLOAD && counter.get() < MAX_UPLOAD_BYTES) {
                 coroutineContext.ensureActive()
-                val size = minOf(chunk.size.toLong(), PER_STREAM_UPLOAD - sent).toInt()
+                val size = minOf(
+                    chunk.size.toLong(),
+                    PER_STREAM_UPLOAD - sent,
+                    MAX_UPLOAD_BYTES - counter.get(),
+                ).coerceAtLeast(0).toInt()
+                if (size <= 0) break
                 out.write(chunk, 0, size)
                 out.flush()
                 sent += size
